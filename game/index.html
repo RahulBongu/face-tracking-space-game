@@ -1,0 +1,831 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Neon Face-Pilot // Motion Arcade</title>
+    
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.js" crossorigin="anonymous"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/face_mesh/face_mesh.js" crossorigin="anonymous"></script>
+
+    <style>
+        :root {
+            --neon-blue: #00f3ff;
+            --neon-pink: #ff0055;
+            --neon-green: #39ff14;
+            --dark-bg: #0a0a12;
+            --panel-bg: rgba(16, 16, 32, 0.85);
+        }
+
+        * {
+            box-sizing: border-box;
+            margin: 0;
+            padding: 0;
+            user-select: none;
+        }
+
+        body {
+            background-color: var(--dark-bg);
+            color: #fff;
+            font-family: 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
+            overflow: hidden;
+            height: 100vh;
+            width: 100vw;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+        }
+
+        #game-container {
+            position: relative;
+            width: 1024px;
+            height: 650px;
+            background: #020208;
+            border: 3px solid var(--neon-blue);
+            box-shadow: 0 0 30px rgba(0, 243, 255, 0.2);
+            border-radius: 12px;
+            overflow: hidden;
+        }
+
+        canvas {
+            display: block;
+            width: 100%;
+            height: 100%;
+        }
+
+        /* UI Screen Overlays */
+        .screen {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: var(--panel-bg);
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+            align-items: center;
+            z-index: 10;
+            opacity: 0;
+            pointer-events: none;
+            transition: opacity 0.4s ease;
+            backdrop-filter: blur(8px);
+        }
+
+        .screen.active {
+            opacity: 1;
+            pointer-events: auto;
+        }
+
+        h1 {
+            font-size: 3.5rem;
+            text-transform: uppercase;
+            letter-spacing: 4px;
+            color: #fff;
+            text-shadow: 0 0 15px var(--neon-blue), 0 0 30px var(--neon-blue);
+            margin-bottom: 10px;
+            font-weight: 900;
+        }
+
+        .subtitle {
+            color: var(--neon-blue);
+            letter-spacing: 2px;
+            margin-bottom: 40px;
+            text-transform: uppercase;
+            font-size: 0.9rem;
+        }
+
+        /* Buttons & Controls */
+        .btn {
+            background: transparent;
+            border: 2px solid var(--neon-pink);
+            color: #fff;
+            padding: 14px 40px;
+            font-size: 1.1rem;
+            font-weight: bold;
+            text-transform: uppercase;
+            letter-spacing: 2px;
+            cursor: pointer;
+            border-radius: 4px;
+            box-shadow: 0 0 15px rgba(255, 0, 85, 0.2);
+            transition: all 0.2s ease;
+            margin: 10px;
+        }
+
+        .btn:hover {
+            background: var(--neon-pink);
+            box-shadow: 0 0 25px rgba(255, 0, 85, 0.6);
+            transform: scale(1.05);
+        }
+
+        .btn-secondary {
+            border-color: var(--neon-blue);
+            box-shadow: 0 0 15px rgba(0, 243, 255, 0.2);
+        }
+        .btn-secondary:hover {
+            background: var(--neon-blue);
+            box-shadow: 0 0 25px rgba(0, 243, 255, 0.6);
+        }
+
+        /* Calibration Panel */
+        .calibration-box {
+            display: flex;
+            gap: 40px;
+            align-items: center;
+            margin-bottom: 30px;
+            background: rgba(25, 25, 50, 0.5);
+            padding: 30px;
+            border-radius: 8px;
+            border: 1px solid rgba(0, 243, 255, 0.3);
+        }
+
+        #webcam-preview-container {
+            position: relative;
+            width: 320px;
+            height: 240px;
+            border: 2px solid var(--neon-blue);
+            background: #000;
+            border-radius: 6px;
+            transform: scaleX(-1); /* Mirror view */
+        }
+
+        #webcam {
+            width: 100%;
+            height: 100%;
+            object-fit: cover;
+            display: block;
+        }
+
+        .calib-guide-overlay {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%) scaleX(-1);
+            width: 80px;
+            height: 80px;
+            border: 2px dashed var(--neon-green);
+            border-radius: 50%;
+            pointer-events: none;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            color: var(--neon-green);
+            font-size: 10px;
+            box-shadow: 0 0 10px rgba(57, 255, 20, 0.3);
+        }
+
+        .settings-panel {
+            display: flex;
+            flex-direction: column;
+            gap: 15px;
+            color: #ccc;
+        }
+
+        .setting-row {
+            display: flex;
+            flex-direction: column;
+            gap: 5px;
+        }
+
+        .setting-row label {
+            font-size: 0.85rem;
+            text-transform: uppercase;
+            letter-spacing: 1px;
+        }
+
+        input[type="range"] {
+            -webkit-appearance: none;
+            width: 200px;
+            background: #222;
+            height: 6px;
+            border-radius: 3px;
+            outline: none;
+        }
+
+        input[type="range"]::-webkit-slider-thumb {
+            -webkit-appearance: none;
+            width: 16px;
+            height: 16px;
+            border-radius: 50%;
+            background: var(--neon-blue);
+            cursor: pointer;
+            box-shadow: 0 0 8px var(--neon-blue);
+        }
+
+        /* Leaderboard and Screens details */
+        .score-board {
+            width: 350px;
+            margin: 20px 0;
+            border-collapse: collapse;
+        }
+
+        .score-board th, .score-board td {
+            padding: 10px;
+            text-align: left;
+            border-bottom: 1px solid rgba(255,255,255,0.1);
+        }
+        .score-board th {
+            color: var(--neon-blue);
+            text-transform: uppercase;
+            font-size: 0.85rem;
+            letter-spacing: 1px;
+        }
+        .score-board tr:first-child td {
+            color: var(--neon-green);
+            font-weight: bold;
+        }
+
+        .game-over-title {
+            color: var(--neon-pink);
+            text-shadow: 0 0 15px var(--neon-pink);
+        }
+
+        .final-score-display {
+            font-size: 1.5rem;
+            margin-bottom: 30px;
+        }
+        .final-score-display span {
+            color: var(--neon-green);
+            font-weight: bold;
+            text-shadow: 0 0 10px rgba(57, 255, 20, 0.5);
+        }
+
+        /* System Status HUD Element */
+        #system-status {
+            position: absolute;
+            bottom: 15px;
+            left: 20px;
+            font-family: monospace;
+            font-size: 11px;
+            color: rgba(255,255,255,0.4);
+            z-index: 5;
+            pointer-events: none;
+        }
+        
+        .status-pulse {
+            display: inline-block;
+            width: 8px;
+            height: 8px;
+            background: var(--neon-green);
+            border-radius: 50%;
+            margin-right: 5px;
+            box-shadow: 0 0 8px var(--neon-green);
+        }
+        .status-pulse.tracking-lost {
+            background: var(--neon-pink);
+            box-shadow: 0 0 8px var(--neon-pink);
+        }
+    </style>
+</head>
+<body>
+
+    <div id="game-container">
+        <canvas id="gameCanvas" width="1024" height="650"></canvas>
+        
+        <div id="system-status">
+            <span id="status-dot" class="status-pulse tracking-lost"></span> 
+            TRACKING INTERFACE: <span id="status-text">INITIALIZING WEBCAM...</span>
+        </div>
+
+        <div id="screen-start" class="screen active">
+            <h1>Neon Face-Pilot</h1>
+            <div class="subtitle">Hands-Free Cyberkinetic Flight Simulator</div>
+            <button class="btn" onclick="switchScreen('calibration')">Initialize Systems</button>
+            <button class="btn btn-secondary" onclick="switchScreen('leaderboard')">Leaderboard</button>
+        </div>
+
+        <div id="screen-calibration" class="screen">
+            <h1>Biometric Alignment</h1>
+            <div class="subtitle">Center your posture to configure face tracking parameters</div>
+            
+            <div class="calibration-box">
+                <div id="webcam-preview-container">
+                    <video id="webcam" autoplay playsinline></video>
+                    <div class="calib-guide-overlay">
+                        <span>CENTER</span>
+                    </div>
+                </div>
+                
+                <div class="settings-panel">
+                    <div class="setting-row">
+                        <label for="input-sensitivity">Motion Sensitivity</label>
+                        <input type="range" id="input-sensitivity" min="1.0" max="4.0" step="0.2" value="2.2">
+                    </div>
+                    <div style="font-size: 13px; color: #aaa; max-width: 240px; line-height: 1.4;">
+                        <p style="margin-bottom: 8px; color: var(--neon-green);">➔ Look straight into the lens.</p>
+                        <p>Keep your head relaxed. Click Calibrate to map your neutral cockpit position.</p>
+                    </div>
+                </div>
+            </div>
+
+            <div>
+                <button class="btn" id="btn-calibrate" onclick="calibrateNeutralFace()">Calibrate & Launch</button>
+                <button class="btn btn-secondary" onclick="switchScreen('start')">Back</button>
+            </div>
+        </div>
+
+        <div id="screen-gameover" class="screen">
+            <h1 class="game-over-title">Hull Destroyed</h1>
+            <div class="subtitle">You collided with space debris</div>
+            
+            <div class="final-score-display">
+                FINAL SCORE: <span id="final-score">00000</span>
+            </div>
+
+            <div style="margin-bottom: 25px; text-align: center;" id="highscore-input-container">
+                <label style="display:block; font-size:11px; margin-bottom:8px; color:var(--neon-blue)">NEW HIGH SCORE! ENTER CALLSIGN:</label>
+                <input type="text" id="player-name-input" maxlength="10" value="PILOT" style="background:#111; border:1px solid var(--neon-blue); padding:8px; color:#fff; text-align:center; font-family:monospace; text-transform:uppercase; outline:none; font-size:16px;">
+            </div>
+
+            <div>
+                <button class="btn" onclick="retryGame()">Fly Again</button>
+                <button class="btn btn-secondary" onclick="switchScreen('start')">Main Menu</button>
+            </div>
+        </div>
+
+        <div id="screen-leaderboard" class="screen">
+            <h1>Sector Records</h1>
+            <div class="subtitle">Top scoring biometric runs</div>
+            
+            <table class="score-board">
+                <thead>
+                    <tr>
+                        <th>Rank</th>
+                        <th>Pilot</th>
+                        <th>Score</th>
+                    </tr>
+                </thead>
+                <tbody id="leaderboard-rows">
+                    </tbody>
+            </table>
+
+            <button class="btn btn-secondary" onclick="switchScreen('start')">Return to Hangar</button>
+        </div>
+    </div>
+
+    <script>
+        // --- GAME DESIGN ENGINE CONFIG ---
+        const canvas = document.getElementById('gameCanvas');
+        const ctx = canvas.getContext('2d');
+
+        let gameState = 'start'; // start, calibration, playing, gameover, leaderboard
+        let score = 0;
+        let highScores = [];
+        let animationFrameId = null;
+
+        // Visual effects system tracking
+        let screenShake = 0;
+        let particles = [];
+        let bgStars = [];
+        let gameTime = 0;
+
+        // Player Spacecraft entity
+        const player = {
+            x: canvas.width / 2,
+            y: canvas.height * 0.75,
+            targetX: canvas.width / 2,
+            targetY: canvas.height * 0.75,
+            radius: 18,
+            speed: 0.12, // Easing coefficient (smooth tracking delay)
+        };
+
+        // Obstacles array
+        let obstacles = [];
+        let obstacleSpawnTimer = 0;
+        let obstacleBaseSpeed = 3;
+        let spawnInterval = 60; // frame counts
+
+        // --- FACE TRACKING CORE TELEMETRY ---
+        const videoElement = document.getElementById('webcam');
+        let faceMesh = null;
+        let camera = null;
+        let isTrackingReady = false;
+
+        // Calibration variables
+        let neutralNosePos = { x: 0.5, y: 0.5 }; 
+        let currentNosePos = { x: 0.5, y: 0.5 };
+        let sensitivity = 2.2;
+
+        // Setup Local Storage database
+        if (localStorage.getItem('neon_face_leaderboard')) {
+            highScores = JSON.parse(localStorage.getItem('neon_face_leaderboard'));
+        } else {
+            highScores = [
+                { name: 'CYBER_ACE', score: 2500 },
+                { name: 'NEON_RIDER', score: 1500 },
+                { name: 'GRID_RUNNER', score: 1000 },
+                { name: 'BIOPILOT', score: 500 },
+                { name: 'RECRUIT', score: 100 }
+            ];
+            localStorage.setItem('neon_face_leaderboard', JSON.stringify(highScores));
+        }
+
+        // Initialize Background Stars
+        for (let i = 0; i < 60; i++) {
+            bgStars.push({
+                x: Math.random() * canvas.width,
+                y: Math.random() * canvas.height,
+                size: Math.random() * 2,
+                speed: Math.random() * 2 + 0.5
+            });
+        }
+
+        // --- APPLICATION SCREEN CONTROLLER ---
+        function switchScreen(screenId) {
+            gameState = screenId;
+            document.querySelectorAll('.screen').forEach(s => s.classList.remove('active'));
+            
+            const targetScreen = document.getElementById(`screen-${screenId}`);
+            if (targetScreen) targetScreen.classList.add('active');
+
+            if (screenId === 'calibration') {
+                initWebcamAndTracking();
+            } else if (screenId === 'leaderboard') {
+                renderLeaderboardTable();
+            } else if (screenId === 'playing') {
+                resetGameplaySession();
+            }
+        }
+
+        // --- WEBCAM AND FACEMESH DISCOVERY ---
+        function initWebcamAndTracking() {
+            if (isTrackingReady) return;
+
+            const statusText = document.getElementById('status-text');
+            const statusDot = document.getElementById('status-dot');
+
+            faceMesh = new FaceMesh({
+                locateFile: (file) => `https://cdn.jsdelivr.net/npm/@mediapipe/face_mesh/${file}`
+            });
+
+            faceMesh.setOptions({
+                maxNumFaces: 1,
+                refineLandmarks: false,
+                minDetectionConfidence: 0.6,
+                minTrackingConfidence: 0.6
+            });
+
+            faceMesh.onResults(onFaceTrackingResults);
+
+            camera = new Camera(videoElement, {
+                onFrame: async () => {
+                    await faceMesh.send({ image: videoElement });
+                },
+                width: 320,
+                height: 240
+            });
+
+            camera.start()
+                .then(() => {
+                    statusText.innerText = "CAMERA CONNECTED // SCANNING FACE...";
+                })
+                .catch(err => {
+                    console.error(err);
+                    statusText.innerText = "ERROR: CAPTURE DEVICE UNREACHABLE";
+                    alert("Webcam access is mandatory for motion control emulation.");
+                });
+        }
+
+        // Pipeline face landmarks tracking logic
+        function onFaceTrackingResults(results) {
+            const statusText = document.getElementById('status-text');
+            const statusDot = document.getElementById('status-dot');
+
+            if (results.multiFaceLandmarks && results.multiFaceLandmarks.length > 0) {
+                statusDot.className = "status-pulse";
+                statusText.innerText = "BIOMETRIC LINK LOCKED";
+                isTrackingReady = true;
+
+                // Index 1 is the Tip of the Nose in MediaPipe Face Mesh topology map
+                const noseLandmark = results.multiFaceLandmarks[0][1];
+                currentNosePos.x = noseLandmark.x;
+                currentNosePos.y = noseLandmark.y;
+
+                // Map telemetry data to coordinates if currently executing active gameplay loop
+                if (gameState === 'playing') {
+                    processHeadTelemetryToPlayerMovement();
+                }
+            } else {
+                statusDot.className = "status-pulse tracking-lost";
+                statusText.innerText = "CRITICAL: PILOT TRACKING LOST";
+            }
+        }
+
+        function calibrateNeutralFace() {
+            if (!isTrackingReady) {
+                alert("Please look cleanly inside the preview camera frame until biometric locks align.");
+                return;
+            }
+            // Record current position as neutral base reference point
+            neutralNosePos.x = currentNosePos.x;
+            neutralNosePos.y = currentNosePos.y;
+
+            // Save sensitivity modifier setup
+            sensitivity = parseFloat(document.getElementById('input-sensitivity').value);
+
+            // Sync original coordinates immediately
+            player.x = canvas.width / 2;
+            player.y = canvas.height * 0.75;
+            player.targetX = player.x;
+            player.targetY = player.y;
+
+            switchScreen('playing');
+        }
+
+        // --- SYSTEM ENGINE MOVEMENT ---
+        function processHeadTelemetryToPlayerMovement() {
+            // Calculate spatial delta offsets from neutral calibration frame
+            // MediaPipe inputs are inverted horizontally due to webcam mirror layout, so subtract correctly
+            let deltaX = (currentNosePos.x - neutralNosePos.x) * sensitivity;
+            let deltaY = (currentNosePos.y - neutralNosePos.y) * sensitivity;
+
+            // Invert deltaX due to canvas geometry alignment matching natural side mirror leans
+            let screenX = (canvas.width / 2) - (deltaX * canvas.width);
+            let screenY = (canvas.height * 0.7) + (deltaY * canvas.height);
+
+            // Boundary clamping buffers
+            player.targetX = Math.max(player.radius * 2, Math.min(canvas.width - player.radius * 2, screenX));
+            player.targetY = Math.max(player.radius * 2, Math.min(canvas.height - player.radius * 2, screenY));
+        }
+
+        // --- GAME PLAY MECHANICS SYSTEM ---
+        function resetGameplaySession() {
+            score = 0;
+            gameTime = 0;
+            obstacles = [];
+            particles = [];
+            obstacleBaseSpeed = 3.5;
+            spawnInterval = 55;
+            
+            player.x = canvas.width / 2;
+            player.y = canvas.height * 0.75;
+            player.targetX = player.x;
+            player.targetY = player.y;
+
+            if (animationFrameId) cancelAnimationFrame(animationFrameId);
+            animationFrameId = requestAnimationFrame(gameLoop);
+        }
+
+        function spawnObstacle() {
+            const radius = Math.random() * 20 + 12;
+            const x = Math.random() * (canvas.width - radius * 2) + radius;
+            const y = -radius;
+            // Generate minor lateral drift speed for dynamic vectors
+            const vx = (Math.random() - 0.5) * 1.5;
+            const vy = obstacleBaseSpeed + Math.random() * 2;
+            
+            // Random styling
+            const colorHue = Math.random() > 0.4 ? 'var(--neon-pink)' : '#ff9900';
+
+            obstacles.push({ x, y, radius, vx, vy, colorHue });
+        }
+
+        function triggerScoreParticle(px, py) {
+            for (let i = 0; i < 6; i++) {
+                particles.push({
+                    x: px, y: py,
+                    vx: (Math.random() - 0.5) * 4,
+                    vy: (Math.random() - 0.5) * 4,
+                    alpha: 1,
+                    size: Math.random() * 3 + 2,
+                    color: 'var(--neon-blue)'
+                });
+            }
+        }
+
+        function triggerExplosion(px, py) {
+            screenShake = 24;
+            for (let i = 0; i < 35; i++) {
+                particles.push({
+                    x: px, y: py,
+                    vx: (Math.random() - 0.5) * 12,
+                    vy: (Math.random() - 0.5) * 12,
+                    alpha: 1,
+                    size: Math.random() * 5 + 2,
+                    color: Math.random() > 0.5 ? 'var(--neon-pink)' : '#ffffff'
+                });
+            }
+        }
+
+        function handleGameOver() {
+            gameState = 'gameover';
+            document.getElementById('final-score').innerText = String(score).padStart(5, '0');
+            
+            // Determine eligibility for local records board placement
+            const lowestRecord = highScores.length >= 7 ? highScores[highScores.length - 1].score : 0;
+            if (score > lowestRecord || highScores.length < 7) {
+                document.getElementById('highscore-input-container').style.display = 'block';
+            } else {
+                document.getElementById('highscore-input-container').style.display = 'none';
+            }
+
+            switchScreen('gameover');
+        }
+
+        function retryGame() {
+            // Save high scores if user submission box is active and visible
+            const inputContainer = document.getElementById('highscore-input-container');
+            if (inputContainer.style.display !== 'none') {
+                const nameInput = document.getElementById('player-name-input').value.trim().toUpperCase() || 'PILOT';
+                highScores.push({ name: nameInput, score: score });
+                highScores.sort((a, b) => b.score - a.score);
+                highScores = highScores.slice(0, 7); // Top 7 local limits
+                localStorage.setItem('neon_face_leaderboard', JSON.stringify(highScores));
+            }
+            switchScreen('playing');
+        }
+
+        function renderLeaderboardTable() {
+            const container = document.getElementById('leaderboard-rows');
+            container.innerHTML = '';
+            highScores.forEach((row, i) => {
+                const tr = document.createElement('tr');
+                tr.innerHTML = `
+                    <td>#${i + 1}</td>
+                    <td>${row.name}</td>
+                    <td>${String(row.score).padStart(5, '0')}</td>
+                `;
+                container.appendChild(tr);
+            });
+        }
+
+        // --- MAIN CANVAS GRAPHICS AND GAME LOOP ---
+        function gameLoop() {
+            if (gameState !== 'playing') return;
+
+            gameTime++;
+            
+            // System progression scaling metrics
+            if (gameTime % 400 === 0) {
+                obstacleBaseSpeed += 0.4;
+                spawnInterval = Math.max(25, spawnInterval - 4);
+            }
+
+            // Real-time time survival scoring accrual
+            if (gameTime % 5 === 0) {
+                score += 1;
+            }
+
+            // Canvas cleanup with minor alpha trails
+            ctx.fillStyle = 'rgba(2, 2, 8, 0.25)';
+            ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+            // Apply screen shake effect
+            ctx.save();
+            if (screenShake > 0) {
+                let dx = (Math.random() - 0.5) * screenShake;
+                let dy = (Math.random() - 0.5) * screenShake;
+                ctx.translate(dx, dy);
+                screenShake *= 0.9; // Decay factor
+                if (screenShake < 0.5) screenShake = 0;
+            }
+
+            // Draw Background Stars
+            ctx.fillStyle = '#ffffff';
+            bgStars.forEach(star => {
+                star.y += star.speed;
+                if (star.y > canvas.height) {
+                    star.y = 0;
+                    star.x = Math.random() * canvas.width;
+                }
+                ctx.globalAlpha = star.speed / 2.5;
+                ctx.fillRect(star.x, star.y, star.size, star.size);
+            });
+            ctx.globalAlpha = 1.0;
+
+            // Render Obstacles System
+            obstacleSpawnTimer++;
+            if (obstacleSpawnTimer >= spawnInterval) {
+                spawnObstacle();
+                obstacleSpawnTimer = 0;
+            }
+
+            for (let i = obstacles.length - 1; i >= 0; i--) {
+                let obs = obstacles[i];
+                obs.x += obs.vx;
+                obs.y += obs.vy;
+
+                // Render neon asteroid shapes
+                ctx.strokeStyle = obs.colorHue;
+                ctx.shadowColor = obs.colorHue;
+                ctx.shadowBlur = 10;
+                ctx.lineWidth = 3;
+                
+                ctx.beginPath();
+                ctx.arc(obs.x, obs.y, obs.radius, 0, Math.PI * 2);
+                ctx.stroke();
+                
+                // Outer spike core layout lines
+                ctx.beginPath();
+                ctx.moveTo(obs.x - obs.radius, obs.y);
+                ctx.lineTo(obs.x + obs.radius, obs.y);
+                ctx.moveTo(obs.x, obs.y - obs.radius);
+                ctx.lineTo(obs.x, obs.y + obs.radius);
+                ctx.strokeStyle = 'rgba(255,255,255,0.15)';
+                ctx.lineWidth = 1;
+                ctx.stroke();
+
+                // Clear shadow profile definitions
+                ctx.shadowBlur = 0;
+
+                // Out of bounds safety checks
+                if (obs.y > canvas.height + obs.radius) {
+                    obstacles.splice(i, 1);
+                    continue;
+                }
+
+                // Mathematical Circle Collision detection matrix
+                let distX = player.x - obs.x;
+                let distY = player.y - obs.y;
+                let distance = Math.sqrt(distX * distX + distY * distY);
+
+                if (distance < (player.radius + obs.radius - 3)) {
+                    triggerExplosion(player.x, player.y);
+                    handleGameOver();
+                    ctx.restore();
+                    return;
+                }
+            }
+
+            // Smooth Interpolation Easing tracking for Player Movement
+            player.x += (player.targetX - player.x) * player.speed;
+            player.y += (player.targetY - player.y) * player.speed;
+
+            // Draw Crosshair HUD surrounding player
+            ctx.strokeStyle = 'rgba(0, 243, 255, 0.25)';
+            ctx.lineWidth = 1;
+            ctx.beginPath();
+            ctx.arc(player.x, player.y, player.radius * 2.2, 0, Math.PI * 2);
+            ctx.stroke();
+
+            // Draw Flight Target Tracker Box
+            ctx.strokeStyle = 'rgba(57, 255, 20, 0.4)';
+            ctx.strokeRect(player.targetX - 5, player.targetY - 5, 10, 10);
+
+            // Draw Player Jet Fighter Shape
+            ctx.shadowColor = 'var(--neon-blue)';
+            ctx.shadowBlur = 15;
+            ctx.fillStyle = 'var(--neon-blue)';
+            ctx.strokeStyle = '#ffffff';
+            ctx.lineWidth = 2;
+
+            ctx.beginPath();
+            // Nose tip point
+            ctx.moveTo(player.x, player.y - player.radius);
+            // Left wing tail
+            ctx.lineTo(player.x - player.radius, player.y + player.radius * 0.8);
+            // Center hull engine bay inner wedge
+            ctx.lineTo(player.x, player.y + player.radius * 0.3);
+            // Right wing tail
+            ctx.lineTo(player.x + player.radius, player.y + player.radius * 0.8);
+            ctx.closePath();
+            ctx.fill();
+            ctx.stroke();
+            ctx.shadowBlur = 0;
+
+            // Particle Engine updates
+            if (gameTime % 2 === 0) {
+                // Engine flame tail simulation
+                particles.push({
+                    x: player.x,
+                    y: player.y + player.radius * 0.5,
+                    vx: (Math.random() - 0.5) * 2,
+                    vy: Math.random() * 3 + 2,
+                    alpha: 1,
+                    size: Math.random() * 4 + 1,
+                    color: 'var(--neon-pink)'
+                });
+            }
+
+            for (let i = particles.length - 1; i >= 0; i--) {
+                let p = particles[i];
+                p.x += p.vx;
+                p.y += p.vy;
+                p.alpha -= 0.025;
+
+                if (p.alpha <= 0) {
+                    particles.splice(i, 1);
+                    continue;
+                }
+
+                ctx.fillStyle = p.color;
+                ctx.globalAlpha = p.alpha;
+                ctx.fillRect(p.x, p.y, p.size, p.size);
+            }
+            ctx.globalAlpha = 1.0;
+
+            // Render Gameplay Text HUD Overlay
+            ctx.fillStyle = 'rgba(255, 255, 255, 0.85)';
+            ctx.font = 'bold 13px monospace';
+            ctx.fillText(`PILOT SCORE // ${String(score).padStart(5, '0')}`, 25, 35);
+            
+            let difficultyTier = Math.floor(obstacleBaseSpeed - 2.5);
+            ctx.fillStyle = 'var(--neon-pink)';
+            ctx.fillText(`SECTOR VELOCITY TIER // 0${difficultyTier}`, 25, 55);
+
+            ctx.restore(); // Clear structural shake frames transformation matrices
+            animationFrameId = requestAnimationFrame(gameLoop);
+        }
+    </script>
+</body>
+</html>
